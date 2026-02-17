@@ -8,7 +8,6 @@
     :root{
       --bg0:#070a12;
       --bg1:#0b1020;
-      --card:rgba(255,255,255,.06);
       --border:rgba(255,255,255,.10);
       --text:#e7eaf2;
       --muted:#a1a8bb;
@@ -72,6 +71,12 @@
     .fill.warn{background:linear-gradient(90deg, rgba(251,191,36,.95), rgba(245,158,11,.8))}
     .fill.bad{background:linear-gradient(90deg, rgba(251,113,133,.95), rgba(239,68,68,.85))}
 
+    .toggle{
+      display:flex; align-items:center; gap:10px;
+      padding:10px 12px;
+    }
+    .toggle input{ width:18px; height:18px; }
+
     details{margin-top:14px}
     summary{cursor:pointer;color:var(--muted);font-weight:800}
     pre{margin-top:10px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:12px;overflow:auto;max-height:55vh;white-space:pre-wrap;word-break:break-word}
@@ -86,24 +91,27 @@
     <div class="row">
       <div>
         <h1>Codex limits</h1>
-        <div class="sub">One click → fetches OpenClaw <code>session_status</code> via the local Gateway and shows a readable summary.</div>
+        <div class="sub">Auto-checks every minute on the server (no browser timer needed). Optionally sends the summary to Telegram.</div>
       </div>
-      <div class="pill" id="state">Idle</div>
+      <div class="pill" id="state">Starting…</div>
     </div>
 
     <div class="actions">
-      <button id="btn">Check remaining balance</button>
+      <button id="btn">Poll now</button>
       <button id="copySummary" class="secondary" disabled>Copy summary</button>
       <button id="copyRaw" class="secondary" disabled>Copy raw</button>
       <div class="pill" id="lastChecked">Last checked: —</div>
+      <div class="pill" id="nextCheck">Next check: —</div>
     </div>
 
     <div class="actions" style="margin-top:10px">
-      <div class="box" style="padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <div class="k" style="margin:0">Telegram push interval (minutes)</div>
-        <input id="mins" type="number" min="0" step="1" value="0" style="width:92px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:9px 10px;color:var(--text);outline:none" />
-        <span class="pill" id="pushState">off</span>
-        <span class="pill" id="lastPush">Last push: —</span>
+      <div class="box toggle">
+        <input id="pushEnabled" type="checkbox" />
+        <div>
+          <div class="k" style="margin:0">Send to Telegram</div>
+          <div class="meta" style="margin-top:4px">When enabled, the server will push the summary every minute.</div>
+        </div>
+        <span class="pill" id="pushState">—</span>
       </div>
     </div>
 
@@ -124,7 +132,7 @@
 
     <details>
       <summary>Show raw response</summary>
-      <pre id="out">(click the button)</pre>
+      <pre id="out">(auto updates every minute)</pre>
     </details>
   </div>
 
@@ -133,6 +141,7 @@
   const out = document.getElementById('out');
   const state = document.getElementById('state');
   const lastChecked = document.getElementById('lastChecked');
+  const nextCheck = document.getElementById('nextCheck');
 
   const copySummary = document.getElementById('copySummary');
   const copyRaw = document.getElementById('copyRaw');
@@ -144,9 +153,12 @@
   const mDay = document.getElementById('mDay');
   const bDay = document.getElementById('bDay');
 
+  const pushEnabled = document.getElementById('pushEnabled');
+  const pushState = document.getElementById('pushState');
+
   let lastJson = null;
   let lastSummary = '';
-  let pushTimer = null;
+  let checkEveryMs = 60000;
 
   function setState(text, kind){
     state.textContent = text;
@@ -160,20 +172,12 @@
   }
 
   function parseUsage(text){
-    // Example lines:
-    // "📊 Usage: 5h 97% left ⏱4h 50m · Day 99% left ⏱6d 23h"
     const m = String(text||'').match(/Usage:\s*5h\s*(\d+)%\s*left\s*([^·]+)·\s*Day\s*(\d+)%\s*left\s*(.*)$/m);
     if(!m) return null;
-    return {
-      pct5h: parseInt(m[1],10),
-      time5h: m[2].trim(),
-      pctDay: parseInt(m[3],10),
-      timeDay: m[4].trim(),
-    };
+    return { pct5h: parseInt(m[1],10), time5h: m[2].trim(), pctDay: parseInt(m[3],10), timeDay: m[4].trim() };
   }
 
   function extractStatusText(json){
-    // Our API returns { ok:true, result:{ content:[{type:'text',text:'...'}], ... } }
     try{
       const blocks = json?.result?.content;
       const t = Array.isArray(blocks) ? blocks.find(b => b?.type === 'text' && b?.text)?.text : null;
@@ -181,7 +185,10 @@
     }catch{return ''}
   }
 
-  function render(parsed, statusText){
+  function renderFromStatus(statusJson){
+    const statusText = extractStatusText(statusJson);
+    const parsed = parseUsage(statusText);
+
     if(!parsed){
       v5h.textContent = '—';
       m5h.textContent = 'Could not parse usage';
@@ -192,6 +199,7 @@
       lastSummary = statusText || '';
       return;
     }
+
     v5h.textContent = parsed.pct5h + '%';
     m5h.textContent = parsed.time5h;
     pctFill(b5h, parsed.pct5h);
@@ -206,84 +214,74 @@
   copySummary.addEventListener('click', () => navigator.clipboard.writeText(lastSummary || ''));
   copyRaw.addEventListener('click', () => navigator.clipboard.writeText(JSON.stringify(lastJson, null, 2)));
 
-  async function doCheck(){
-    btn.disabled = true;
-    setState('Loading…');
-    out.textContent = '';
-    try {
-      const r = await fetch('/api/status');
+  async function refresh(){
+    try{
+      const r = await fetch('/api/status', { cache: 'no-store' });
       const j = await r.json();
       lastJson = j;
+
+      checkEveryMs = j.checkEveryMs || 60000;
+
       out.textContent = JSON.stringify(j, null, 2);
+      if (j.status) renderFromStatus(j.status);
 
-      const statusText = extractStatusText(j);
-      const parsed = parseUsage(statusText);
-      render(parsed, statusText);
+      if (j.ok) setState('OK', 'ok');
+      else setState('Error', 'err');
 
-      const now = new Date();
-      lastChecked.textContent = 'Last checked: ' + now.toLocaleString();
+      const lc = j.lastCheckedMs ? new Date(j.lastCheckedMs) : null;
+      lastChecked.textContent = 'Last checked: ' + (lc ? lc.toLocaleString() : '—');
+
+      pushEnabled.checked = !!j.pushEnabled;
+      pushState.textContent = j.pushEnabled ? 'ON' : 'OFF';
+      pushState.className = 'pill ' + (j.pushEnabled ? 'ok' : '');
 
       copySummary.disabled = !lastSummary;
-      copyRaw.disabled = false;
-
-      setState(r.ok ? 'OK' : 'Error', r.ok ? 'ok' : 'err');
-      return r.ok;
+      copyRaw.disabled = !lastJson;
     } catch (e) {
-      out.textContent = String(e);
       setState('Error', 'err');
+      out.textContent = String(e);
       copySummary.disabled = true;
       copyRaw.disabled = true;
-      return false;
+    }
+  }
+
+  async function pollNow(){
+    btn.disabled = true;
+    try {
+      await fetch('/api/poll-now', { method: 'POST' });
     } finally {
       btn.disabled = false;
+      // refresh shortly after triggering
+      setTimeout(refresh, 400);
     }
   }
 
-  async function pushToTelegram(){
-    try{
-      const r = await fetch('/api/notify', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
-      const j = await r.json();
-      const now = new Date();
-      document.getElementById('lastPush').textContent = 'Last push: ' + now.toLocaleString();
-      document.getElementById('pushState').textContent = r.ok ? 'pushed' : 'error';
-      document.getElementById('pushState').className = 'pill ' + (r.ok ? 'ok' : 'err');
-      return j;
-    } catch {
-      document.getElementById('pushState').textContent = 'error';
-      document.getElementById('pushState').className = 'pill err';
-      return null;
-    }
+  async function setPush(enabled){
+    pushState.textContent = '…';
+    pushState.className = 'pill';
+    await fetch('/api/push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled }) });
+    await refresh();
   }
 
-  function setIntervalMinutes(mins){
-    const ps = document.getElementById('pushState');
-    if (pushTimer) { clearInterval(pushTimer); pushTimer = null; }
-    if (!mins || mins <= 0) {
-      ps.textContent = 'off';
-      ps.className = 'pill';
+  pushEnabled.addEventListener('change', () => setPush(pushEnabled.checked));
+  btn.addEventListener('click', pollNow);
+
+  function tickCountdown(){
+    const lc = lastJson?.lastCheckedMs || 0;
+    if (!lc) {
+      nextCheck.textContent = 'Next check: —';
       return;
     }
-    const ms = Math.max(60_000, Math.min(24*60*60_000, mins * 60_000));
-    ps.textContent = 'on';
-    ps.className = 'pill ok';
-    // fire immediately then repeat
-    pushToTelegram();
-    pushTimer = setInterval(pushToTelegram, ms);
+    const next = lc + checkEveryMs;
+    const ms = Math.max(0, next - Date.now());
+    const s = Math.ceil(ms/1000);
+    nextCheck.textContent = 'Next check: in ' + s + 's';
   }
 
-  btn.addEventListener('click', doCheck);
-
-  const minsInput = document.getElementById('mins');
-  const saved = parseInt(localStorage.getItem('codexlimit:mins') || '0', 10);
-  minsInput.value = String(isNaN(saved) ? 0 : saved);
-  setIntervalMinutes(parseInt(minsInput.value, 10) || 0);
-
-  minsInput.addEventListener('change', () => {
-    const v = Math.max(0, Math.floor(parseInt(minsInput.value || '0', 10) || 0));
-    minsInput.value = String(v);
-    localStorage.setItem('codexlimit:mins', String(v));
-    setIntervalMinutes(v);
-  });
+  // initial + interval refresh
+  refresh();
+  setInterval(refresh, 60000);
+  setInterval(tickCountdown, 250);
 </script>
 </body>
 </html>
