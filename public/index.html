@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Codex Limits</title>
+  <style>
+    :root{
+      --bg0:#070a12;
+      --bg1:#0b1020;
+      --card:rgba(255,255,255,.06);
+      --border:rgba(255,255,255,.10);
+      --text:#e7eaf2;
+      --muted:#a1a8bb;
+      --dim:#7b8399;
+      --blue:#60a5fa;
+      --green:#34d399;
+      --amber:#fbbf24;
+      --rose:#fb7185;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+      background:
+        radial-gradient(1200px 700px at 20% -10%, rgba(96,165,250,.18), transparent 55%),
+        radial-gradient(900px 600px at 100% 0%, rgba(167,139,250,.12), transparent 55%),
+        linear-gradient(180deg,var(--bg0),var(--bg1));
+      color:var(--text);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+    }
+
+    .card{
+      width:min(960px,100%);
+      background:linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.04));
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.45);
+    }
+    h1{margin:0;font-size:16px;font-weight:950;letter-spacing:.2px}
+    .sub{margin-top:6px;color:var(--muted);font-size:13px;line-height:1.4}
+
+    .row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .pill{font-size:12px;border:1px solid rgba(255,255,255,.12);padding:5px 10px;border-radius:999px;color:var(--muted);background:rgba(0,0,0,.12)}
+    .pill.ok{border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.16);color:#06160f}
+    .pill.err{border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.16);color:#2a0811}
+
+    .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+    button{
+      background:linear-gradient(135deg,#1d4ed8,#2563eb);
+      color:white;border:0;border-radius:12px;
+      padding:10px 12px;font-weight:950;cursor:pointer;
+      box-shadow:0 10px 22px rgba(29,78,216,.16);
+    }
+    button.secondary{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);box-shadow:none}
+    button:disabled{opacity:.55;cursor:not-allowed}
+
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+    .box{border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.18);border-radius:16px;padding:12px}
+    .k{font-size:11px;color:var(--muted);font-weight:900;letter-spacing:.10em;text-transform:uppercase}
+    .v{margin-top:6px;font-size:22px;font-weight:950}
+    .meta{margin-top:4px;color:var(--dim);font-size:12px}
+
+    .bar{margin-top:10px;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+    .fill{height:100%;width:0%}
+    .fill.good{background:linear-gradient(90deg, rgba(52,211,153,.9), rgba(96,165,250,.7))}
+    .fill.warn{background:linear-gradient(90deg, rgba(251,191,36,.95), rgba(245,158,11,.8))}
+    .fill.bad{background:linear-gradient(90deg, rgba(251,113,133,.95), rgba(239,68,68,.85))}
+
+    details{margin-top:14px}
+    summary{cursor:pointer;color:var(--muted);font-weight:800}
+    pre{margin-top:10px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:12px;overflow:auto;max-height:55vh;white-space:pre-wrap;word-break:break-word}
+
+    @media (max-width: 840px){
+      .grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="row">
+      <div>
+        <h1>Codex limits</h1>
+        <div class="sub">One click → fetches OpenClaw <code>session_status</code> via the local Gateway and shows a readable summary.</div>
+      </div>
+      <div class="pill" id="state">Idle</div>
+    </div>
+
+    <div class="actions">
+      <button id="btn">Check remaining balance</button>
+      <button id="copySummary" class="secondary" disabled>Copy summary</button>
+      <button id="copyRaw" class="secondary" disabled>Copy raw</button>
+      <div class="pill" id="lastChecked">Last checked: —</div>
+    </div>
+
+    <div class="actions" style="margin-top:10px">
+      <div class="box" style="padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="k" style="margin:0">Telegram push interval (minutes)</div>
+        <input id="mins" type="number" min="0" step="1" value="0" style="width:92px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:9px 10px;color:var(--text);outline:none" />
+        <span class="pill" id="pushState">off</span>
+        <span class="pill" id="lastPush">Last push: —</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="box">
+        <div class="k">5h window remaining</div>
+        <div class="v" id="v5h">—</div>
+        <div class="meta" id="m5h">—</div>
+        <div class="bar"><div class="fill" id="b5h"></div></div>
+      </div>
+      <div class="box">
+        <div class="k">Daily remaining</div>
+        <div class="v" id="vDay">—</div>
+        <div class="meta" id="mDay">—</div>
+        <div class="bar"><div class="fill" id="bDay"></div></div>
+      </div>
+    </div>
+
+    <details>
+      <summary>Show raw response</summary>
+      <pre id="out">(click the button)</pre>
+    </details>
+  </div>
+
+<script>
+  const btn = document.getElementById('btn');
+  const out = document.getElementById('out');
+  const state = document.getElementById('state');
+  const lastChecked = document.getElementById('lastChecked');
+
+  const copySummary = document.getElementById('copySummary');
+  const copyRaw = document.getElementById('copyRaw');
+
+  const v5h = document.getElementById('v5h');
+  const m5h = document.getElementById('m5h');
+  const b5h = document.getElementById('b5h');
+  const vDay = document.getElementById('vDay');
+  const mDay = document.getElementById('mDay');
+  const bDay = document.getElementById('bDay');
+
+  let lastJson = null;
+  let lastSummary = '';
+  let pushTimer = null;
+
+  function setState(text, kind){
+    state.textContent = text;
+    state.className = 'pill' + (kind ? ' ' + kind : '');
+  }
+
+  function pctFill(el, pct){
+    const p = Math.max(0, Math.min(100, pct));
+    el.style.width = p.toFixed(0) + '%';
+    el.className = 'fill ' + (p < 25 ? 'bad' : (p < 55 ? 'warn' : 'good'));
+  }
+
+  function parseUsage(text){
+    // Example lines:
+    // "📊 Usage: 5h 97% left ⏱4h 50m · Day 99% left ⏱6d 23h"
+    const m = String(text||'').match(/Usage:\s*5h\s*(\d+)%\s*left\s*([^·]+)·\s*Day\s*(\d+)%\s*left\s*(.*)$/m);
+    if(!m) return null;
+    return {
+      pct5h: parseInt(m[1],10),
+      time5h: m[2].trim(),
+      pctDay: parseInt(m[3],10),
+      timeDay: m[4].trim(),
+    };
+  }
+
+  function extractStatusText(json){
+    // Our API returns { ok:true, result:{ content:[{type:'text',text:'...'}], ... } }
+    try{
+      const blocks = json?.result?.content;
+      const t = Array.isArray(blocks) ? blocks.find(b => b?.type === 'text' && b?.text)?.text : null;
+      return t || '';
+    }catch{return ''}
+  }
+
+  function render(parsed, statusText){
+    if(!parsed){
+      v5h.textContent = '—';
+      m5h.textContent = 'Could not parse usage';
+      pctFill(b5h, 0);
+      vDay.textContent = '—';
+      mDay.textContent = 'Open raw response';
+      pctFill(bDay, 0);
+      lastSummary = statusText || '';
+      return;
+    }
+    v5h.textContent = parsed.pct5h + '%';
+    m5h.textContent = parsed.time5h;
+    pctFill(b5h, parsed.pct5h);
+
+    vDay.textContent = parsed.pctDay + '%';
+    mDay.textContent = parsed.timeDay;
+    pctFill(bDay, parsed.pctDay);
+
+    lastSummary = `5h remaining: ${parsed.pct5h}% (${parsed.time5h})\nDay remaining: ${parsed.pctDay}% (${parsed.timeDay})`;
+  }
+
+  copySummary.addEventListener('click', () => navigator.clipboard.writeText(lastSummary || ''));
+  copyRaw.addEventListener('click', () => navigator.clipboard.writeText(JSON.stringify(lastJson, null, 2)));
+
+  async function doCheck(){
+    btn.disabled = true;
+    setState('Loading…');
+    out.textContent = '';
+    try {
+      const r = await fetch('/api/status');
+      const j = await r.json();
+      lastJson = j;
+      out.textContent = JSON.stringify(j, null, 2);
+
+      const statusText = extractStatusText(j);
+      const parsed = parseUsage(statusText);
+      render(parsed, statusText);
+
+      const now = new Date();
+      lastChecked.textContent = 'Last checked: ' + now.toLocaleString();
+
+      copySummary.disabled = !lastSummary;
+      copyRaw.disabled = false;
+
+      setState(r.ok ? 'OK' : 'Error', r.ok ? 'ok' : 'err');
+      return r.ok;
+    } catch (e) {
+      out.textContent = String(e);
+      setState('Error', 'err');
+      copySummary.disabled = true;
+      copyRaw.disabled = true;
+      return false;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function pushToTelegram(){
+    try{
+      const r = await fetch('/api/notify', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+      const j = await r.json();
+      const now = new Date();
+      document.getElementById('lastPush').textContent = 'Last push: ' + now.toLocaleString();
+      document.getElementById('pushState').textContent = r.ok ? 'pushed' : 'error';
+      document.getElementById('pushState').className = 'pill ' + (r.ok ? 'ok' : 'err');
+      return j;
+    } catch {
+      document.getElementById('pushState').textContent = 'error';
+      document.getElementById('pushState').className = 'pill err';
+      return null;
+    }
+  }
+
+  function setIntervalMinutes(mins){
+    const ps = document.getElementById('pushState');
+    if (pushTimer) { clearInterval(pushTimer); pushTimer = null; }
+    if (!mins || mins <= 0) {
+      ps.textContent = 'off';
+      ps.className = 'pill';
+      return;
+    }
+    const ms = Math.max(60_000, Math.min(24*60*60_000, mins * 60_000));
+    ps.textContent = 'on';
+    ps.className = 'pill ok';
+    // fire immediately then repeat
+    pushToTelegram();
+    pushTimer = setInterval(pushToTelegram, ms);
+  }
+
+  btn.addEventListener('click', doCheck);
+
+  const minsInput = document.getElementById('mins');
+  const saved = parseInt(localStorage.getItem('codexlimit:mins') || '0', 10);
+  minsInput.value = String(isNaN(saved) ? 0 : saved);
+  setIntervalMinutes(parseInt(minsInput.value, 10) || 0);
+
+  minsInput.addEventListener('change', () => {
+    const v = Math.max(0, Math.floor(parseInt(minsInput.value || '0', 10) || 0));
+    minsInput.value = String(v);
+    localStorage.setItem('codexlimit:mins', String(v));
+    setIntervalMinutes(v);
+  });
+</script>
+</body>
+</html>
