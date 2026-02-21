@@ -34,7 +34,7 @@
     }
 
     .card{
-      width:min(960px,100%);
+      width:min(980px,100%);
       background:linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.04));
       border:1px solid var(--border);
       border-radius:18px;
@@ -71,18 +71,31 @@
     .fill.warn{background:linear-gradient(90deg, rgba(251,191,36,.95), rgba(245,158,11,.8))}
     .fill.bad{background:linear-gradient(90deg, rgba(251,113,133,.95), rgba(239,68,68,.85))}
 
-    .toggle{
-      display:flex; align-items:center; gap:10px;
-      padding:10px 12px;
-    }
+    .toggle{display:flex; align-items:center; gap:10px; padding:10px 12px;}
     .toggle input{ width:18px; height:18px; }
+
+    .settings{margin-top:12px;display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}
+    .field{display:flex;flex-direction:column;gap:6px}
+    .field label{font-size:11px;color:var(--muted);font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+    .field input,.field select{
+      border:1px solid rgba(255,255,255,.16);
+      border-radius:10px;
+      background:rgba(0,0,0,.2);
+      color:var(--text);
+      padding:8px 10px;
+      font-size:13px;
+    }
 
     details{margin-top:14px}
     summary{cursor:pointer;color:var(--muted);font-weight:800}
     pre{margin-top:10px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:12px;overflow:auto;max-height:55vh;white-space:pre-wrap;word-break:break-word}
 
-    @media (max-width: 840px){
+    @media (max-width: 900px){
       .grid{grid-template-columns:1fr}
+      .settings{grid-template-columns:1fr 1fr}
+    }
+    @media (max-width: 560px){
+      .settings{grid-template-columns:1fr}
     }
   </style>
 </head>
@@ -91,7 +104,7 @@
     <div class="row">
       <div>
         <h1>Codex limits</h1>
-        <div class="sub">Auto-checks every minute on the server (no browser timer needed). Optionally sends the summary to Telegram.</div>
+        <div class="sub">Server-side scheduler + optional Telegram push.</div>
       </div>
       <div class="pill" id="state">Starting…</div>
     </div>
@@ -100,18 +113,57 @@
       <button id="btn">Poll now</button>
       <button id="copySummary" class="secondary" disabled>Copy summary</button>
       <button id="copyRaw" class="secondary" disabled>Copy raw</button>
+      <button id="testPush" class="secondary">Send test notification</button>
       <div class="pill" id="lastChecked">Last checked: —</div>
       <div class="pill" id="nextCheck">Next check: —</div>
+      <div class="pill" id="lastPush">Last push: —</div>
     </div>
 
     <div class="actions" style="margin-top:10px">
-      <div class="box toggle">
+      <div class="box toggle" style="width:100%">
         <input id="pushEnabled" type="checkbox" />
         <div>
           <div class="k" style="margin:0">Send to Telegram</div>
-          <div class="meta" style="margin-top:4px">When enabled, the server will push the summary every minute.</div>
+          <div class="meta" style="margin-top:4px">Pushes respect interval, quiet hours, and threshold rules below.</div>
         </div>
         <span class="pill" id="pushState">—</span>
+      </div>
+    </div>
+
+    <div class="box" style="margin-top:10px">
+      <div class="k">Notification settings</div>
+      <div class="settings">
+        <div class="field">
+          <label for="intervalMin">Interval (minutes)</label>
+          <input id="intervalMin" type="number" min="1" max="180" step="1" />
+        </div>
+        <div class="field">
+          <label for="threshold5h">5h alert when ≤ %</label>
+          <input id="threshold5h" type="number" min="1" max="100" step="1" />
+        </div>
+        <div class="field">
+          <label for="thresholdDay">Day alert when ≤ %</label>
+          <input id="thresholdDay" type="number" min="1" max="100" step="1" />
+        </div>
+        <div class="field">
+          <label for="quietEnabled">Quiet hours</label>
+          <select id="quietEnabled">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="quietStart">Quiet starts (hour)</label>
+          <input id="quietStart" type="number" min="0" max="23" step="1" />
+        </div>
+        <div class="field">
+          <label for="quietEnd">Quiet ends (hour)</label>
+          <input id="quietEnd" type="number" min="0" max="23" step="1" />
+        </div>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button id="saveSettings">Save settings</button>
+        <span class="pill" id="settingsState">Not saved yet</span>
       </div>
     </div>
 
@@ -132,7 +184,7 @@
 
     <details>
       <summary>Show raw response</summary>
-      <pre id="out">(auto updates every minute)</pre>
+      <pre id="out">(auto updates from server)</pre>
     </details>
   </div>
 
@@ -142,9 +194,11 @@
   const state = document.getElementById('state');
   const lastChecked = document.getElementById('lastChecked');
   const nextCheck = document.getElementById('nextCheck');
+  const lastPush = document.getElementById('lastPush');
 
   const copySummary = document.getElementById('copySummary');
   const copyRaw = document.getElementById('copyRaw');
+  const testPush = document.getElementById('testPush');
 
   const v5h = document.getElementById('v5h');
   const m5h = document.getElementById('m5h');
@@ -156,9 +210,19 @@
   const pushEnabled = document.getElementById('pushEnabled');
   const pushState = document.getElementById('pushState');
 
+  const intervalMin = document.getElementById('intervalMin');
+  const threshold5h = document.getElementById('threshold5h');
+  const thresholdDay = document.getElementById('thresholdDay');
+  const quietEnabled = document.getElementById('quietEnabled');
+  const quietStart = document.getElementById('quietStart');
+  const quietEnd = document.getElementById('quietEnd');
+  const saveSettings = document.getElementById('saveSettings');
+  const settingsState = document.getElementById('settingsState');
+
   let lastJson = null;
   let lastSummary = '';
   let checkEveryMs = 60000;
+  let settingsDirty = false;
 
   function setState(text, kind){
     state.textContent = text;
@@ -214,6 +278,22 @@
   copySummary.addEventListener('click', () => navigator.clipboard.writeText(lastSummary || ''));
   copyRaw.addEventListener('click', () => navigator.clipboard.writeText(JSON.stringify(lastJson, null, 2)));
 
+  function applySettings(settings){
+    // Don't clobber user's in-progress edits with auto-refresh snapshots.
+    if (!settingsDirty) {
+      intervalMin.value = settings.notificationIntervalMinutes ?? 1;
+      threshold5h.value = settings.threshold5hPct ?? 100;
+      thresholdDay.value = settings.thresholdDayPct ?? 100;
+      quietEnabled.value = String(!!settings.quietHoursEnabled);
+      quietStart.value = settings.quietHoursStart ?? 23;
+      quietEnd.value = settings.quietHoursEnd ?? 8;
+    }
+
+    const lp = settings.lastPushMs ? new Date(settings.lastPushMs).toLocaleString() : 'never';
+    const status = settings.lastPushStatus || 'unknown';
+    lastPush.textContent = `Last push: ${lp} (${status})`;
+  }
+
   async function refresh(){
     try{
       const r = await fetch('/api/status', { cache: 'no-store' });
@@ -221,7 +301,6 @@
       lastJson = j;
 
       checkEveryMs = j.checkEveryMs || 60000;
-
       out.textContent = JSON.stringify(j, null, 2);
       if (j.status) renderFromStatus(j.status);
 
@@ -234,6 +313,8 @@
       pushEnabled.checked = !!j.pushEnabled;
       pushState.textContent = j.pushEnabled ? 'ON' : 'OFF';
       pushState.className = 'pill ' + (j.pushEnabled ? 'ok' : '');
+
+      applySettings(j.settings || {});
 
       copySummary.disabled = !lastSummary;
       copyRaw.disabled = !lastJson;
@@ -251,8 +332,23 @@
       await fetch('/api/poll-now', { method: 'POST' });
     } finally {
       btn.disabled = false;
-      // refresh shortly after triggering
-      setTimeout(refresh, 400);
+      setTimeout(refresh, 500);
+    }
+  }
+
+  async function sendTestPush(){
+    testPush.disabled = true;
+    try {
+      const r = await fetch('/api/test-push', { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      settingsState.textContent = 'Test notification sent';
+      settingsState.className = 'pill ok';
+      await refresh();
+    } catch (e) {
+      settingsState.textContent = 'Test failed';
+      settingsState.className = 'pill err';
+    } finally {
+      testPush.disabled = false;
     }
   }
 
@@ -263,22 +359,70 @@
     await refresh();
   }
 
+  function readSettingsInput(){
+    return {
+      notificationIntervalMinutes: Number(intervalMin.value || 1),
+      threshold5hPct: Number(threshold5h.value || 100),
+      thresholdDayPct: Number(thresholdDay.value || 100),
+      quietHoursEnabled: quietEnabled.value === 'true',
+      quietHoursStart: Number(quietStart.value || 23),
+      quietHoursEnd: Number(quietEnd.value || 8),
+    };
+  }
+
+  async function saveSettingsNow(){
+    saveSettings.disabled = true;
+    settingsState.textContent = 'Saving…';
+    settingsState.className = 'pill';
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(readSettingsInput()),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      settingsDirty = false;
+      settingsState.textContent = 'Saved';
+      settingsState.className = 'pill ok';
+      await refresh();
+    } catch (e) {
+      settingsState.textContent = 'Save failed';
+      settingsState.className = 'pill err';
+    } finally {
+      saveSettings.disabled = false;
+    }
+  }
+
   pushEnabled.addEventListener('change', () => setPush(pushEnabled.checked));
   btn.addEventListener('click', pollNow);
+  saveSettings.addEventListener('click', saveSettingsNow);
+  testPush.addEventListener('click', sendTestPush);
+
+  // Mark settings as dirty when user edits, so auto-refresh doesn't overwrite inputs.
+  [intervalMin, threshold5h, thresholdDay, quietEnabled, quietStart, quietEnd].forEach((el) => {
+    el.addEventListener('input', () => {
+      settingsDirty = true;
+      settingsState.textContent = 'Unsaved changes';
+      settingsState.className = 'pill';
+    });
+    el.addEventListener('change', () => {
+      settingsDirty = true;
+      settingsState.textContent = 'Unsaved changes';
+      settingsState.className = 'pill';
+    });
+  });
 
   function tickCountdown(){
-    const lc = lastJson?.lastCheckedMs || 0;
-    if (!lc) {
+    const nc = lastJson?.nextCheckMs || 0;
+    if (!nc) {
       nextCheck.textContent = 'Next check: —';
       return;
     }
-    const next = lc + checkEveryMs;
-    const ms = Math.max(0, next - Date.now());
+    const ms = Math.max(0, nc - Date.now());
     const s = Math.ceil(ms/1000);
     nextCheck.textContent = 'Next check: in ' + s + 's';
   }
 
-  // initial + interval refresh
   refresh();
   setInterval(refresh, 60000);
   setInterval(tickCountdown, 250);

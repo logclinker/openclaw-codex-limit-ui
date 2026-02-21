@@ -7,13 +7,23 @@ It fetches `session_status` via the Gateway, parses the `Usage: 5h … · Day �
 ![Desktop](docs/assets/desktop.png)
 
 ## Features
-- One-click “Check remaining balance”
+- One-click “Poll now”
 - Readable summary cards:
   - **5h window remaining**
   - **Daily remaining**
 - Progress bars (green/amber/red)
 - Copy buttons (summary + raw JSON)
-- Optional Telegram push interval (client-side timer)
+- Optional Telegram push with **server-side scheduler**
+
+### New controls
+- **Interval (minutes)**: set how often server checks and schedules push logic (persists across restart)
+- **Push ON/OFF**: keeps previous behavior (single toggle)
+- **Quiet hours**: suppress pushes during local-hour range
+- **Threshold alerts**:
+  - push when 5h remaining is `<= threshold5h`
+  - OR when day remaining is `<= thresholdDay`
+- **Send test notification**: immediately sends a Telegram test message
+- **Last push status**: shows last send/skip/error state
 
 ![Mobile](docs/assets/mobile.png)
 
@@ -32,6 +42,8 @@ Environment variables:
 - `HOST` (default `0.0.0.0`)
 - `OPENCLAW_URL` (default `http://127.0.0.1:18789`)
 - `OPENCLAW_SESSION_KEY` (default `main`)
+- `CHECK_EVERY_MS` (fallback default interval if no saved state yet)
+- `STATE_PATH` (default `./state.local.json`)
 
 Gateway auth:
 - Set `OPENCLAW_TOKEN` **or** let it read from `~/.openclaw/openclaw.json`:
